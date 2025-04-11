@@ -1,0 +1,7 @@
+[
+    {
+        "model": "gpt-4",
+        "api_key": "sk-zk20578136d8f75ace663eb4d95bf62911067b59510738e6",
+        "base_url": "https://api.zhizengzeng.com/v1/"
+    }
+]
