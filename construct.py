@@ -25,14 +25,14 @@ def read_file(filename="Original.txt"):
         return file.read().strip()
 
 
-def write_file(content: str, filename="Original.txt"):
+def write_file(content: str, filename="Final.txt"):
     """_summary_ :write file contents, especially for getting the original text
 
     Args:
         filename (str): file name for the original text
         content (str): contents to be written into
     """
-    with open(filename, "r", encoding="utf-8") as file:
+    with open(filename, "w", encoding="utf-8") as file:
         file.write(content)
 
 

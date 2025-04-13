@@ -199,7 +199,7 @@ class AutoGenArticleEditor:
                 self.reporter,
             ],
             messages=[],
-            max_round=5,
+            max_round=6,
             speaker_selection_method="round_robin",  
         )
 
@@ -212,7 +212,6 @@ class AutoGenArticleEditor:
         """Execute the editing workflow"""
         print_progress("Starting article editing process...")
 
-        # Step 1: User proxy initiates the chat
         self.user_proxy.initiate_chat(
             self.manager,
             message=f"""
@@ -226,18 +225,6 @@ class AutoGenArticleEditor:
             """,
         )
 
-        # Step 2: Task decomposer processes the requirements
-        self.manager.step("Task_Decomposer")
-
-        # Step 3: Editors (Conservative and Creative) run in parallel
-        self.manager.step(["Editor_Conservative", "Editor_Creative"])
-
-        # Step 4: Integrator combines the outputs
-        self.manager.step("Integrator")
-
-        # Step 5: Reporter finalizes the output
-        self.manager.step("Reporter")
-
         # Process final output
         final_message = self.group_chat.messages[-1]["content"]
         if "### Final Version ###" in final_message:
@@ -246,7 +233,7 @@ class AutoGenArticleEditor:
                 .split("### Feedback ###")[0]
                 .strip()
             )
-            write_file("Final.txt", final_text)
+            write_file(final_text)
             print_progress(f"Final article saved to Final.txt.")
         else:
             print_progress(
