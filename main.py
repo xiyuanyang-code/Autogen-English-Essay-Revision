@@ -73,33 +73,44 @@ class AutoGenArticleEditor:
         self.task_decomposer = AssistantAgent(
             name="Task_Decomposer",
             system_message=f"""
-            The total task: {self.total_task}
+            The total task: {total_prompt}
+            
 
             You are an expert in task decomposition. Your responsibilities:
-            1. Analyze requirements: {self.requirements}
-            2. Break down editing task into subtasks
-            3. Assign subtasks to editing team
+            1. Analyze requirements: \n{requirements}\n
+            2. Read the original passage, the passage is shown below\n:{self.original_article}\n
+            3. You need to provide a more specific modification plan based on the requirements, 
+            combining it with the original text, but without making specific changes. 
+            For example: the relative clause in a certain sentence does not conform to specific grammatical rules and needs to be revised; 
+            or the word choice in a certain part is too simplistic and needs to be optimized; 
+            or the logic in a certain section needs to be further strengthened.
+            4. More detailed modification requirements are needed, covering all aspects such as grammar, logic, word choice, and sentence structure.
             
-            Provide subtasks in numbered list format.
+
+            Response format:
+            ### Specific Requirements
+            [Return specified and modified requirements]
+
             """,
             llm_config={
                 "config_list": self.config_list,
-                "temperature": 0.3,  # Low randomness for accurate task breakdown
+                "temperature": 0.3,  
             },
         )
         
         # Conservative editor agent
         self.editor1 = AssistantAgent(
             name="Editor_Conservative",
-            system_message="""
-            You are a conservative editor specializing in:
-            - Grammar accuracy
-            - Precise word choice
-            - Formal tone
-            - Citation consistency
+            system_message=f"""
+
+            {total_prompt}\n
+            For the specified requirements: {specified_requirements}\n
+            The original text: {self.original_article}\n
+
+            Attention!!!, particularly for you, as a more meticulous writer, your revisions should focus on the logic and organizational structure of the article, making it more coherent.
             
             Provide complete edited text and brief feedback (<50 words).
-            Ensure native English usage and <250 word limit.
+            Ensure native English usage and <{1.2*self.max_length} word limit.
             
             Response format:
             ### Version ###
@@ -110,22 +121,21 @@ class AutoGenArticleEditor:
             """,
             llm_config={
                 "config_list": self.config_list,
-                "temperature": 0.3,  # Low randomness for conservative edits
-            },
+                "temperature": 0.2
+            }
         )
         
         # Creative editor agent
         self.editor2 = AssistantAgent(
             name="Editor_Creative",
-            system_message="""
-            You are a creative editor focusing on:
-            - Flow and readability
-            - Argument clarity
-            - Structural improvements
-            - Engagement
-            
+            system_message=f"""
+            {total_prompt}\n
+            For the specified requirements: {specified_requirements}\n
+            The original text: {self.original_article}\n
+
+            Attention!!!, Note that, particularly for you, as a free-spirited and imaginative writer, your revisions should focus on the innovative sentence structures and rhetorical techniques in the article, making it more creative and eye-catching.
             Provide complete edited text and brief feedback (<50 words).
-            Ensure native English usage and <250 word limit.
+            Ensure native English usage and <{1.2*self.max_length} word limit.
             
             Response format:
             ### Version ###
@@ -136,8 +146,8 @@ class AutoGenArticleEditor:
             """,
             llm_config={
                 "config_list": self.config_list,
-                "temperature": 0.7,  # Higher randomness for creative edits
-            },
+                "temperature": 0.8
+            }
         )
         
         # Integration agent
