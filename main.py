@@ -1,9 +1,6 @@
 # Import required modules
-import Requirement
-import os
-import json
-from datetime import datetime
-from typing import Dict, List
+from prompts import * 
+from construct import *
 from pydantic import BaseModel
 from autogen import (
     AssistantAgent,
@@ -13,58 +10,51 @@ from autogen import (
     config_list_from_json,
 )
 
-# Load requirements from external files
-total_task = Requirement.total_task
-requirements = Requirement.requirments
+
+'''
+The intuition:
+    1.We use for agents to make the revision task:
+        1.Task decomposer:
+            Given the original text and the original prompts, and let the agent to generate the promblems and issues strictly (no actual revisions will be made during this process.)
+            The agent needs to return a simple report pointing several problems that the passage have faced.
+        2.Editor Conservative and Editor Creative
+            Where actual revisions take place. Set different temperatures for the "imagination"
+            !The two editor will not influence each other, works parallelly.
+        3.integrator: 
+            Integrate for both two passage to make better improvements
+            To make better improvements and allow more diversity, we allow the maxlength of current passage is the 1.5*max_length
+        4.Reporter
+            Check the format and restrict words.( \le maxlength)
+
+    2.For the first version, we will just make one round conversation:
+        User -> Task decomposer -> Editor Conservative  -> Integrator -> Reporter
+                                -> Editor Creative      ->
+    3. To avoid information loss, we will pass total_prompt and the original text for all agents.
+'''
 
 # Configure Pydantic model settings
 BaseModel.model_config = {"protected_namespaces": ()}
 
 class AutoGenArticleEditor:
     def __init__(self):
+        create_dirs()
+
         # Initialize configuration
         self.config_list = config_list_from_json(env_or_file="OAI_CONFIG_LIST.json")
-        self.original_article = self._read_file("Original.txt")
-        self.total_task = total_task
-        self.requirements = requirements
-        self.log_dir = "log"
-        os.makedirs(self.log_dir, exist_ok=True)
+        self.original_article = read_file(file_name)
+        self.log_filename = get_log_filename("log")
+        self.max_length = 200
         
         # Initialize agents
         self.task_decomposer = None
         self.editor1 = None
         self.editor2 = None
         self.integrator = None
+        self.reporter = None
         self.user_proxy = None
         self.group_chat = None
-        
         self._setup_agents()
     
-    def _read_file(self, filename: str) -> str:
-        """Read file content"""
-        with open(filename, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    
-    def _write_file(self, filename: str, content: str):
-        """Write content to file"""
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(content)
-    
-    def _get_log_filename(self) -> str:
-        """Generate timestamp-based log filename"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return os.path.join(self.log_dir, f"log_{timestamp}.txt")
-    
-    def _log_conversation(self, message: str):
-        """Record conversation to log file"""
-        log_file = self._get_log_filename()
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(message + "\n\n")
-    
-    def _print_progress(self, message: str):
-        """Print progress message and log it"""
-        print(f"[PROGRESS] {message}")
-        self._log_conversation(f"[SYSTEM] {message}")
 
     def _setup_agents(self):
         """Configure all agent instances"""
@@ -194,8 +184,7 @@ class AutoGenArticleEditor:
     
     def run(self):
         """Execute the editing workflow"""
-        self._print_progress("Starting article editing process...")
-        self._print_progress(f"Original article length: {len(self.original_article.split())} words")
+        print_progress("Starting article editing process...")
         
         # Initiate the chat workflow
         self.user_proxy.initiate_chat(
@@ -215,12 +204,12 @@ class AutoGenArticleEditor:
         final_message = self.group_chat.messages[-1]["content"]
         if "### Final Version ###" in final_message:
             final_text = final_message.split("### Final Version ###")[1].split("### Feedback ###")[0].strip()
-            self._write_file("Final.txt", final_text)
-            self._print_progress(f"Final article saved to Final.txt. Length: {len(final_text.split())} words")
+            write_file("Final.txt", final_text)
+            print_progress(f"Final article saved to Final.txt.")
         else:
-            self._print_progress("Process completed but final version format invalid. Check logs.")
+            print_progress("Process completed but final version format invalid. Check logs.")
         
-        self._print_progress(f"Conversation log saved to {self._get_log_filename()}")
+        print_progress(f"Conversation log saved to {self.log_filename}")
 
 if __name__ == "__main__":
     editor = AutoGenArticleEditor()
