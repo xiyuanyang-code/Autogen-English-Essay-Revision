@@ -1,10 +1,21 @@
+"""
+Author: Xiyuan Yang   xiyuan_yang@outlook.com
+Date: 2025-04-11 14:50:06
+LastEditors: Xiyuan Yang   xiyuan_yang@outlook.com
+LastEditTime: 2025-04-13 11:20:52
+FilePath: /Autogen-English-Essay/construct.py
+Description:
+Do you code and make progress today?
+Copyright (c) 2025 by Xiyuan Yang, All Rights Reserved.
+"""
+
 # Constructing file structures.
 
 import os
 from datetime import *
 
 
-def read_file(filename: str):
+def read_file(filename="Original.txt"):
     """_summary_ :read file contents, especially for getting the original text
 
     Args:
@@ -14,7 +25,7 @@ def read_file(filename: str):
         return file.read().strip()
 
 
-def write_file(filename: str, content: str):
+def write_file(content: str, filename="Original.txt"):
     """_summary_ :write file contents, especially for getting the original text
 
     Args:
@@ -61,4 +72,7 @@ def print_progress(message: str):
     log_conversation(f"[SYSTEM] {message}")
 
 
-file_name = "Original.txt"
+if __name__ == "__main__":
+    print("Testing...")
+else:
+    print("Constructing all files...")

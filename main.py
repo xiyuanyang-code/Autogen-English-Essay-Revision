@@ -1,7 +1,6 @@
 # Import required modules
-from prompts import * 
+from prompts import *
 from construct import *
-from pydantic import BaseModel
 from autogen import (
     AssistantAgent,
     UserProxyAgent,
@@ -11,7 +10,7 @@ from autogen import (
 )
 
 
-'''
+"""
 The intuition:
     1.We use for agents to make the revision task:
         1.Task decomposer:
@@ -30,21 +29,22 @@ The intuition:
         User -> Task decomposer -> Editor Conservative  -> Integrator -> Reporter
                                 -> Editor Creative      ->
     3. To avoid information loss, we will pass total_prompt and the original text for all agents.
-'''
+"""
 
 # Configure Pydantic model settings
-BaseModel.model_config = {"protected_namespaces": ()}
+# BaseModel.model_config = {"protected_namespaces": ()}
+
 
 class AutoGenArticleEditor:
     def __init__(self):
-        create_dirs()
+        create_dirs("log")
 
         # Initialize configuration
         self.config_list = config_list_from_json(env_or_file="OAI_CONFIG_LIST.json")
-        self.original_article = read_file(file_name)
+        self.original_article = read_file()
         self.log_filename = get_log_filename("log")
         self.max_length = 200
-        
+
         # Initialize agents
         self.task_decomposer = None
         self.editor1 = None
@@ -54,11 +54,10 @@ class AutoGenArticleEditor:
         self.user_proxy = None
         self.group_chat = None
         self._setup_agents()
-    
 
     def _setup_agents(self):
         """Configure all agent instances"""
-        
+
         # User proxy agent (human admin simulator)
         self.user_proxy = UserProxyAgent(
             name="Admin",
@@ -68,7 +67,7 @@ class AutoGenArticleEditor:
             default_auto_reply="Task received. Passing to the team...",
             max_consecutive_auto_reply=1,
         )
-        
+
         # Task decomposition agent
         self.task_decomposer = AssistantAgent(
             name="Task_Decomposer",
@@ -94,17 +93,17 @@ class AutoGenArticleEditor:
             """,
             llm_config={
                 "config_list": self.config_list,
-                "temperature": 0.3,  
+                "temperature": 0.3,
             },
         )
-        
+
         # Conservative editor agent
         self.editor1 = AssistantAgent(
             name="Editor_Conservative",
             system_message=f"""
 
             {total_prompt}\n
-            For the specified requirements: {specified_requirements}\n
+            You will receive the specific requirements from the previous agents.\n
             The original text: {self.original_article}\n
 
             Attention!!!, particularly for you, as a more meticulous writer, your revisions should focus on the logic and organizational structure of the article, making it more coherent.
@@ -119,12 +118,9 @@ class AutoGenArticleEditor:
             ### Feedback ###
             [comments]
             """,
-            llm_config={
-                "config_list": self.config_list,
-                "temperature": 0.2
-            }
+            llm_config={"config_list": self.config_list, "temperature": 0.2},
         )
-        
+
         # Creative editor agent
         self.editor2 = AssistantAgent(
             name="Editor_Creative",
@@ -144,24 +140,22 @@ class AutoGenArticleEditor:
             ### Feedback ###
             [comments]
             """,
-            llm_config={
-                "config_list": self.config_list,
-                "temperature": 0.8
-            }
+            llm_config={"config_list": self.config_list, "temperature": 0.8},
         )
-        
+
         # Integration agent
         self.integrator = AssistantAgent(
             name="Integrator",
             system_message=f"""
+            {total_prompt}\n
             You are the final integrator. Your responsibilities:
-            1. Evaluate all editor suggestions
-            2. Incorporate changes based on: {self.requirements}
-            3. Produce final version
-            
+            1.You will receive three documents: the original article and two modified articles by two editors(one conservative and one creative)
+            2.You need to take an overall perspective to compare the highlights of the two revised drafts against the original manuscript, and integrate the two articles, taking the strengths from each.
+            3.!!Attention: You need to make sure your passage (after integrated) is no more than {1.5*self.max_length} words.
+
             Response format:
             ### Final Version ###
-            [text]
+            [text after integrated]
             
             ### Feedback ###
             [comments]
@@ -171,8 +165,30 @@ class AutoGenArticleEditor:
                 "temperature": 0.5,  # Balanced randomness
             },
         )
-        
-        # Configure group chat with manual speaker selection
+
+        self.reporter = AssistantAgent(
+            name="Reporter",
+            system_message=f"""
+            {total_prompt},\n
+            The original article is: {self.original_article}\n
+            You are the final reporter, you will receive the final scripts modified, and make the last modifications:
+            1. Make sure all your modifications adhere to the English Usage.
+            2. Make sure the total length is no more than {self.max_length} words.
+            
+            Response format:
+            ### Final version ###
+            [final text]
+
+            ### Feedback ###
+            In this section, you are asked to generate a report about the modifications between the final version and the original version.
+            """,
+            llm_config={
+                "config_list": self.config_list,
+                "temperature": 0.1,
+            },
+        )
+
+        # Configure group chat without custom_speaker_order
         self.group_chat = GroupChat(
             agents=[
                 self.user_proxy,
@@ -180,23 +196,23 @@ class AutoGenArticleEditor:
                 self.editor1,
                 self.editor2,
                 self.integrator,
+                self.reporter,
             ],
             messages=[],
-            max_round=20,
-            speaker_selection_method="manual",  # Manual control for sequential workflow
+            max_round=5,
+            speaker_selection_method="round_robin",  
         )
-        
+
         # Group chat manager
         self.manager = GroupChatManager(
-            groupchat=self.group_chat,
-            llm_config={"config_list": self.config_list}
+            groupchat=self.group_chat, llm_config={"config_list": self.config_list}
         )
-    
+
     def run(self):
         """Execute the editing workflow"""
         print_progress("Starting article editing process...")
-        
-        # Initiate the chat workflow
+
+        # Step 1: User proxy initiates the chat
         self.user_proxy.initiate_chat(
             self.manager,
             message=f"""
@@ -204,22 +220,41 @@ class AutoGenArticleEditor:
             {self.original_article}
             
             Requirements:
-            {self.requirements}
+            {requirements}
             
             Please begin editing process.
             """,
         )
-        
+
+        # Step 2: Task decomposer processes the requirements
+        self.manager.step("Task_Decomposer")
+
+        # Step 3: Editors (Conservative and Creative) run in parallel
+        self.manager.step(["Editor_Conservative", "Editor_Creative"])
+
+        # Step 4: Integrator combines the outputs
+        self.manager.step("Integrator")
+
+        # Step 5: Reporter finalizes the output
+        self.manager.step("Reporter")
+
         # Process final output
         final_message = self.group_chat.messages[-1]["content"]
         if "### Final Version ###" in final_message:
-            final_text = final_message.split("### Final Version ###")[1].split("### Feedback ###")[0].strip()
+            final_text = (
+                final_message.split("### Final Version ###")[1]
+                .split("### Feedback ###")[0]
+                .strip()
+            )
             write_file("Final.txt", final_text)
             print_progress(f"Final article saved to Final.txt.")
         else:
-            print_progress("Process completed but final version format invalid. Check logs.")
-        
+            print_progress(
+                "Process completed but final version format invalid. Check logs."
+            )
+
         print_progress(f"Conversation log saved to {self.log_filename}")
+
 
 if __name__ == "__main__":
     editor = AutoGenArticleEditor()

@@ -34,3 +34,8 @@ total_prompt = f"{total_system_message}\n\
                  The topic of the essay is {text_topic}\n\
                  {total_task}\n\
                  Try your best!"
+
+if __name__ == "__main__":
+    print("Testing...")
+else:
+    print("Importing all prompts...")
