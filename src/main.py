@@ -1,7 +1,7 @@
 import os
 import dotenv
 import construct
-import prompts
+import prompts as prompts
 
 from pydantic import BaseModel
 from typing import List
@@ -59,7 +59,7 @@ initial_reuqirements = BaseMessage(
     meta_dict={},
 )
 
-original_text = construct.read_file("Camel_demo/English-Essay-Revision/Original.txt")
+original_text = construct.read_file("data/Original.txt")
 # print(original_text)
 original_passage = BaseMessage(
     role_name="User",
