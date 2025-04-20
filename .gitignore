@@ -4,4 +4,4 @@
 __pycache__/
 .cache/
 /OAI_CONFIG_LIST.json
-.history
+.history/

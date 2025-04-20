@@ -2,3 +2,4 @@ camel-ai[all]
 pydantic==1.10.7
 python-dotenv==1.0.0
 typing
+datetime
