@@ -1,83 +1,125 @@
-# Import required modules
-from prompts import *
-from construct import *
-from autogen import (
-    AssistantAgent,
-    UserProxyAgent,
-    GroupChat,
-    GroupChatManager,
-    config_list_from_json,
+import os
+import dotenv
+import construct
+import prompts
+
+from pydantic import BaseModel
+from typing import List
+from camel.models import ModelFactory
+from camel.types import ModelPlatformType, ModelType, TaskType, RoleType
+from camel.configs import ChatGPTConfig
+from camel.agents import ChatAgent, TaskPlannerAgent
+from camel.messages import BaseMessage
+from camel.prompts import TextPrompt
+from camel.societies import RolePlaying
+from camel.societies.workforce import Workforce
+from camel.toolkits import ThinkingToolkit, SearchToolkit, HumanToolkit, FunctionTool
+from camel.tasks import Task
+
+
+# Load api key and url
+dotenv.load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+BASE_URL = os.getenv("BASE_URL")
+
+# define prompts and models
+system_message = prompts.total_system_message
+base_model = ModelFactory.create(
+    model_platform=ModelPlatformType.OPENAI,
+    model_type=ModelType.GPT_4O_MINI,
+    model_config_dict=ChatGPTConfig().as_dict(),
+    api_key=OPENAI_API_KEY,
+    url=BASE_URL,
+)
+
+# For the settings of base agents
+single_agent = ChatAgent(
+    system_message=system_message,
+    model=base_model,
+    message_window_size=10,
+    tools=[
+        # *SearchToolkit().get_tools(),
+        # *ThinkingToolkit().get_tools(),
+        # *HumanToolkit().get_tools(),
+    ],
+)
+
+# Add several prompts for the single agents
+topic_message = BaseMessage(
+    role_name="User",
+    role_type=RoleType.USER,
+    content=f"The text topic is {prompts.text_topic}",
+    meta_dict={},
+)
+
+initial_reuqirements = BaseMessage(
+    role_name="User",
+    role_type=RoleType.USER,
+    content=f"The Initial requirements are as follows: {prompts.requirements}",
+    meta_dict={},
+)
+
+original_text = construct.read_file("Camel_demo/English-Essay-Revision/Original.txt")
+# print(original_text)
+original_passage = BaseMessage(
+    role_name="User",
+    role_type=RoleType.USER,
+    content=f"""the text of my argumentative essay is given below:\n\n\
+        =================ORIGINAL passage BEGIN================\n\
+            {original_text}\n\
+        =================ORIGINAL passage END================
+            """,
+    meta_dict={},
 )
 
 
-"""
-The intuition:
-    1.We use for agents to make the revision task:
-        1.Task decomposer:
-            Given the original text and the original prompts, and let the agent to generate the promblems and issues strictly (no actual revisions will be made during this process.)
-            The agent needs to return a simple report pointing several problems that the passage have faced.
-        2.Editor Conservative and Editor Creative
-            Where actual revisions take place. Set different temperatures for the "imagination"
-            !The two editor will not influence each other, works parallelly.
-        3.integrator: 
-            Integrate for both two passage to make better improvements
-            To make better improvements and allow more diversity, we allow the maxlength of current passage is the 1.5*max_length
-        4.Reporter
-            Check the format and restrict words.( \le maxlength)
-
-    2.For the first version, we will just make one round conversation:
-        User -> Task decomposer -> Editor Conservative  -> Integrator -> Reporter
-                                -> Editor Creative      ->
-    3. To avoid information loss, we will pass total_prompt and the original text for all agents.
-"""
-
-# Configure Pydantic model settings
-# BaseModel.model_config = {"protected_namespaces": ()}
+class ResponseFormat(BaseModel):
+    whole_text_after_edited: str
+    Modification_summary: str
 
 
-class AutoGenArticleEditor:
-    def __init__(self):
-        create_dirs("log")
+max_length = 250
 
-        # Initialize configuration
-        self.config_list = config_list_from_json(env_or_file="OAI_CONFIG_LIST.json")
-        self.original_article = read_file()
-        self.log_filename = get_log_filename("log")
-        self.max_length = 200
 
-        # Initialize agents
-        self.task_decomposer = None
-        self.editor1 = None
-        self.editor2 = None
-        self.integrator = None
-        self.reporter = None
-        self.user_proxy = None
-        self.group_chat = None
-        self._setup_agents()
+# Act for the single agents
+def run_single_agents():
+    single_agent.record_message(initial_reuqirements)
+    single_agent.record_message(topic_message)
+    single_agent.record_message(original_passage)
+    UserMessage = "Start revising the essay and generate a report"
+    response = single_agent.step(UserMessage, response_format=ResponseFormat)
+    # print(type(response))
+    print(response.msgs[0].content)
 
-    def _setup_agents(self):
-        """Configure all agent instances"""
 
-        # User proxy agent (human admin simulator)
-        self.user_proxy = UserProxyAgent(
-            name="Admin",
-            system_message="A human admin who provides the article and requirements.",
-            human_input_mode="NEVER",
-            code_execution_config=False,
-            default_auto_reply="Task received. Passing to the team...",
-            max_consecutive_auto_reply=1,
-        )
+# Define the Agentic workflow
+work_force = Workforce(
+    description="Automated English Essay Revision",
+    new_worker_agent_kwargs={"model": base_model},
+    coordinator_agent_kwargs={"model": base_model},
+    task_agent_kwargs={"model": base_model},
+)
 
-        # Task decomposition agent
-        self.task_decomposer = AssistantAgent(
-            name="Task_Decomposer",
-            system_message=f"""
-            The total task: {total_prompt}
+# Define worker
+# search_tool = FunctionTool(SearchToolkit.search_baidu(max_results=6))
+
+# search_agent = ChatAgent(
+#     system_message=system_message
+#     + "For your specified task, you need to search the web for more information and provide them with the downstream agents",
+#     model=base_model,
+#     message_window_size=10,
+#     tools=[search_tool],
+# )
+
+task_agent = ChatAgent(
+    model=base_model,
+    system_message=f"""
+            The total task: {prompts.total_prompt}
             
 
             You are an expert in task decomposition. Your responsibilities:
-            1. Analyze requirements: \n{requirements}\n
-            2. Read the original passage, the passage is shown below\n:{self.original_article}\n
+            1. Analyze requirements: \n{prompts.requirements}\n
+            2. Read the original passage, the passage is shown below\n:{original_text}\n
             3. You need to provide a more specific modification plan based on the requirements, 
             combining it with the original text, but without making specific changes. 
             For example: the relative clause in a certain sentence does not conform to specific grammatical rules and needs to be revised; 
@@ -91,25 +133,20 @@ class AutoGenArticleEditor:
             [Return specified and modified requirements]
 
             """,
-            llm_config={
-                "config_list": self.config_list,
-                "temperature": 0.3,
-            },
-        )
+    message_window_size=10,
+)
 
-        # Conservative editor agent
-        self.editor1 = AssistantAgent(
-            name="Editor_Conservative",
-            system_message=f"""
+conservative_agent = ChatAgent(
+    system_message=f"""
 
-            {total_prompt}\n
+            {prompts.total_prompt}\n
             You will receive the specific requirements from the previous agents.\n
-            The original text: {self.original_article}\n
+            The original text: {original_text}\n
 
             Attention!!!, particularly for you, as a more meticulous writer, your revisions should focus on the logic and organizational structure of the article, making it more coherent.
             
             Provide complete edited text and brief feedback (<50 words).
-            Ensure native English usage and <{1.2*self.max_length} word limit.
+            Ensure native English usage and <{1.2 * max_length} word limit.
             
             Response format:
             ### Version ###
@@ -118,40 +155,40 @@ class AutoGenArticleEditor:
             ### Feedback ###
             [comments]
             """,
-            llm_config={"config_list": self.config_list, "temperature": 0.2},
-        )
+    model=base_model,
+    message_window_size=10,
+)
 
-        # Creative editor agent
-        self.editor2 = AssistantAgent(
-            name="Editor_Creative",
-            system_message=f"""
-            {total_prompt}\n
-            For the specified requirements: {specified_requirements}\n
-            The original text: {self.original_article}\n
+imaginative_agent = ChatAgent(
+    system_message=f"""
 
-            Attention!!!, Note that, particularly for you, as a free-spirited and imaginative writer, your revisions should focus on the innovative sentence structures and rhetorical techniques in the article, making it more creative and eye-catching.
+            {prompts.total_prompt}\n
+            You will receive the specific requirements from the previous agents.\n
+            The original text: {original_text}\n
+
+            Attention!!!, particularly for you, as a more meticulous writer, your revisions should focus on the logic and organizational structure of the article, making it more coherent.
+            
             Provide complete edited text and brief feedback (<50 words).
-            Ensure native English usage and <{1.2*self.max_length} word limit.
+            Ensure native English usage and <{1.2 * max_length} word limit.
             
             Response format:
             ### Version ###
             [full edited text]
-            
+    
             ### Feedback ###
             [comments]
             """,
-            llm_config={"config_list": self.config_list, "temperature": 0.8},
-        )
+    model=base_model,
+    message_window_size=10,
+)
 
-        # Integration agent
-        self.integrator = AssistantAgent(
-            name="Integrator",
-            system_message=f"""
-            {total_prompt}\n
+integrator_agent = ChatAgent(
+    system_message=f"""
+            {prompts.total_prompt}\n
             You are the final integrator. Your responsibilities:
             1.You will receive three documents: the original article and two modified articles by two editors(one conservative and one creative)
             2.You need to take an overall perspective to compare the highlights of the two revised drafts against the original manuscript, and integrate the two articles, taking the strengths from each.
-            3.!!Attention: You need to make sure your passage (after integrated) is no more than {1.5*self.max_length} words.
+            3.!!Attention: You need to make sure your passage (after integrated) is no more than {1.5 * max_length} words.
 
             Response format:
             ### Final Version ###
@@ -160,20 +197,17 @@ class AutoGenArticleEditor:
             ### Feedback ###
             [comments]
             """,
-            llm_config={
-                "config_list": self.config_list,
-                "temperature": 0.5,  # Balanced randomness
-            },
-        )
+    model=base_model,
+    message_window_size=10,
+)
 
-        self.reporter = AssistantAgent(
-            name="Reporter",
-            system_message=f"""
-            {total_prompt},\n
-            The original article is: {self.original_article}\n
+reporter_agent = ChatAgent(
+    system_message=f"""
+            {prompts.total_prompt},\n
+            The original article is: {original_text}\n
             You are the final reporter, you will receive the final scripts modified, and make the last modifications:
             1. Make sure all your modifications adhere to the English Usage.
-            2. Make sure the total length is no more than {self.max_length} words.
+            2. Make sure the total length is no more than {max_length} words.
             
             Response format:
             ### Final version ###
@@ -182,67 +216,42 @@ class AutoGenArticleEditor:
             ### Feedback ###
             In this section, you are asked to generate a report about the modifications between the final version and the original version.
             """,
-            llm_config={
-                "config_list": self.config_list,
-                "temperature": 0.1,
-            },
-        )
+    model=base_model,
+    message_window_size=10,
+)
 
-        # Configure group chat without custom_speaker_order
-        self.group_chat = GroupChat(
-            agents=[
-                self.user_proxy,
-                self.task_decomposer,
-                self.editor1,
-                self.editor2,
-                self.integrator,
-                self.reporter,
-            ],
-            messages=[],
-            max_round=6,
-            speaker_selection_method="round_robin",  
-        )
+# Add WorkNode
+work_force.add_single_agent_worker(
+    description="Specify the task into subtasks",
+    worker=task_agent,
+).add_single_agent_worker(
+    description="Make some modifications conservatively",
+    worker=conservative_agent,
+).add_single_agent_worker(
+    description="Make some modifications imaginaively",
+    worker=imaginative_agent,
+).add_single_agent_worker(
+    description="Integrate all the modifications",
+    worker=integrator_agent,
+).add_single_agent_worker(
+    description="Generate the modifications report",
+    worker=reporter_agent,
+)
 
-        # Group chat manager
-        self.manager = GroupChatManager(
-            groupchat=self.group_chat, llm_config={"config_list": self.config_list}
-        )
+def run_workforce():
+    task = Task(
+        content=prompts.total_task,
+        id = "0",
+    )
 
-    def run(self):
-        """Execute the editing workflow"""
-        print_progress("Starting article editing process...")
-
-        self.user_proxy.initiate_chat(
-            self.manager,
-            message=f"""
-            Article to edit:
-            {self.original_article}
-            
-            Requirements:
-            {requirements}
-            
-            Please begin editing process.
-            """,
-        )
-
-        # Process final output
-        final_message = self.group_chat.messages[-1]["content"]
-        if "### Final Version ###" in final_message:
-            final_text = (
-                final_message.split("### Final Version ###")[1]
-                .split("### Feedback ###")[0]
-                .strip()
-            )
-            write_file(final_text)
-            print_progress(f"Final article saved to Final.txt.")
-        else:
-            print_progress(
-                "Process completed but final version format invalid. Check logs."
-            )
-
-        print_progress(f"Conversation log saved to {self.log_filename}")
-
+    task = work_force.process_task(task)
+    print(task.result)
 
 if __name__ == "__main__":
-    editor = AutoGenArticleEditor()
-    editor.run()
+    # If you want to use the single agent...
+    run_single_agents()
+
+    # If you want to use the multiagent framework
+    run_workforce()
+
+    
