@@ -54,7 +54,7 @@ Then you can just run the files and enjoy the world of Agents!😊
 
 ### Demo
 
-> The video to be done
+Demo Link on bilibili: [Demo Video](https://www.bilibili.com/video/BV1bL5UzqEvW/)
 
 ## References
 
